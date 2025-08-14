@@ -8,6 +8,9 @@ public:
 
     DirectX::XMMATRIX GetView() const;
     DirectX::XMMATRIX GetProjection() const;
+
+    DirectX::XMFLOAT3 GetPosition3f() const { return m_Position; }
+
     void SetLens(float fovY, float aspect, float zn, float zf);
     void UpdateViewMatrix();
 

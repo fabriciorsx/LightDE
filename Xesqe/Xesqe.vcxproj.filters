@@ -16,6 +16,9 @@
     <Filter Include="Arquivos de Cabeçalho\NewFilter1">
       <UniqueIdentifier>{f1a8f8d9-c5a5-405d-97f1-19cb8351b47e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Models">
+      <UniqueIdentifier>{764f545c-66af-4afe-80e3-8174cb34c41a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -72,8 +75,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="shaders.hlsl">
+    <None Include="pbr_shaders.hlsl">
       <Filter>Arquivos de Cabeçalho</Filter>
     </None>
+    <None Include="simple_shaders.hlsl">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Models\mustang.obj">
+      <Filter>Models</Filter>
+    </Text>
   </ItemGroup>
 </Project>

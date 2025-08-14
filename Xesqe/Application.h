@@ -26,10 +26,16 @@ private:
     void CreateRtvDescriptorHeap();
     void FlushCommandQueue();
 
-    void BuildBoxGeometry();
+    void BuildGeometry();
     void BuildRootSignature();
     void BuildShadersAndPso();
+    void CreateDsvDescriptorHeap();
 
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_lightCircleVertexBufferGPU;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_lightCircleVertexBufferUploader;
+    D3D12_VERTEX_BUFFER_VIEW m_lightCircleVbv;
+    UINT m_lightCircleVertexCount = 0;
     Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
 
     HINSTANCE m_hAppInst = nullptr;
@@ -63,14 +69,20 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_boxVertexBufferGPU;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_boxIndexBufferGPU;
-    D3D12_VERTEX_BUFFER_VIEW m_boxVbv{};
-    D3D12_INDEX_BUFFER_VIEW m_boxIbv{};
-    UINT m_boxIndexCount = 0;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_boxVertexBufferUploader;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_boxIndexBufferUploader;
+    D3D12_VERTEX_BUFFER_VIEW m_modelVbv;
+    D3D12_INDEX_BUFFER_VIEW m_modelIbv;
+    UINT m_modelIndexCount = 0;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_modelVertexBufferGPU;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_modelIndexBufferGPU;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_modelVertexBufferUploader;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_modelIndexBufferUploader;
 
     Camera m_Camera;
     DirectX::XMFLOAT4X4 m_world{};
     POINT m_LastMousePos{};
+    DirectX::XMFLOAT3 m_lightPosition;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_simplePso;
+    void BuildLightCircle();
 };
