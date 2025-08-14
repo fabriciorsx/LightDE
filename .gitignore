@@ -1,0 +1,32 @@
+# Pastas do Visual Studio
+.vs/
+Debug/
+Release/
+x64/
+x86/
+ARM/
+ARM64/
+ipch/
+
+# Configurações e caches
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+*.ipch
+*.pch
+*.tmp
+*.log
+*.tlog
+*.lastbuildstate
+*.cache
+
+# Binários e intermediários
+*.obj
+*.pdb
+*.exe
+*.dll
+*.lib
+*.ilk
+*.exp
+*.idb
