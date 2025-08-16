@@ -1,26 +1,129 @@
 #include "pch.h"
 #include "Application.h"
+#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <map>
+#include <tuple>
+#include <stdexcept>
 
-// Estrutura de vértice para PBR
-struct Vertex
+
+Physics::Physics() :
+    position(0, 50, 0),
+    velocity(0, 0, 0),
+    acceleration(0, -9.81f, 0),
+    mass(1.0f),
+    bounciness(0.3f),
+    friction(0.8f),
+    onGround(false),
+    angularVelocity(0, 0, 0),
+    angularDamping(0.3f)
 {
-    DirectX::XMFLOAT3 Pos;
-    DirectX::XMFLOAT3 Normal;    // Normal para iluminação
-    DirectX::XMFLOAT3 Albedo;    // Cor base/difusa
-    float Metallic;              // Metalicidade (0.0 = dielétrico, 1.0 = metálico)
-    float Roughness;             // Rugosidade (0.0 = espelho, 1.0 = difuso total)
-    float AO;                    // Ambient Occlusion
-};
-struct SimpleVertex
-{
-    DirectX::XMFLOAT3 Pos;
-    DirectX::XMFLOAT3 Color;
-};
-// Estrutura para conter os dados do modelo
-struct Model {
-    std::vector<Vertex> vertices;
-    std::vector<unsigned int> indices;
-};
+    DirectX::XMStoreFloat4(&orientation, DirectX::XMQuaternionIdentity());
+}
+
+Terrain::Terrain(float w, float d, int rows, int cols)
+    : width(w), depth(d), verticesPerRow(rows), verticesPerCol(cols) {
+    GenerateHeightMap();
+}
+
+void Terrain::GenerateHeightMap() {
+    heightMap.resize(verticesPerRow);
+    for (int i = 0; i < verticesPerRow; i++) {
+        heightMap[i].resize(verticesPerCol);
+        for (int j = 0; j < verticesPerCol; j++) {
+            float x = (i - verticesPerRow / 2.0f) * (width / verticesPerRow);
+            float z = (j - verticesPerCol / 2.0f) * (depth / verticesPerCol);
+            heightMap[i][j] = 5.0f * sinf(x * 0.1f) * cosf(z * 0.1f);
+        }
+    }
+}
+
+float Terrain::GetHeightAt(float x, float z) {
+    float fx = (x + width / 2) / width * (verticesPerRow - 1);
+    float fz = (z + depth / 2) / depth * (verticesPerCol - 1);
+
+    int ix = (int)fx;
+    int iz = (int)fz;
+
+    if (ix < 0 || ix >= verticesPerRow - 1 || iz < 0 || iz >= verticesPerCol - 1)
+        return 0.0f;
+
+    float fracX = fx - ix;
+    float fracZ = fz - iz;
+
+    float h00 = heightMap[ix][iz];
+    float h10 = heightMap[ix + 1][iz];
+    float h01 = heightMap[ix][iz + 1];
+    float h11 = heightMap[ix + 1][iz + 1];
+
+    float h0 = h00 * (1 - fracX) + h10 * fracX;
+    float h1 = h01 * (1 - fracX) + h11 * fracX;
+
+    return h0 * (1 - fracZ) + h1 * fracZ;
+}
+
+Model Terrain::GenerateTerrainMesh() {
+    Model terrainModel;
+
+    for (int i = 0; i < verticesPerRow; i++) {
+        for (int j = 0; j < verticesPerCol; j++) {
+            Vertex vertex;
+            vertex.Pos.x = (i - verticesPerRow / 2.0f) * (width / verticesPerRow);
+            vertex.Pos.y = heightMap[i][j];
+            vertex.Pos.z = (j - verticesPerCol / 2.0f) * (depth / verticesPerCol);
+
+            vertex.Normal = CalculateNormal(i, j);
+
+            vertex.Albedo = { 0.4f, 0.3f, 0.1f };
+            vertex.Metallic = 0.0f;
+            vertex.Roughness = 0.9f;
+            vertex.AO = 1.0f;
+
+            terrainModel.vertices.push_back(vertex);
+        }
+    }
+
+    for (int i = 0; i < verticesPerRow - 1; i++) {
+        for (int j = 0; j < verticesPerCol - 1; j++) {
+            int topLeft = i * verticesPerCol + j;
+            int topRight = topLeft + 1;
+            int bottomLeft = (i + 1) * verticesPerCol + j;
+            int bottomRight = bottomLeft + 1;
+
+            terrainModel.indices.push_back(topLeft);
+            terrainModel.indices.push_back(bottomLeft);
+            terrainModel.indices.push_back(topRight);
+
+            terrainModel.indices.push_back(topRight);
+            terrainModel.indices.push_back(bottomLeft);
+            terrainModel.indices.push_back(bottomRight);
+        }
+    }
+
+    return terrainModel;
+}
+
+DirectX::XMFLOAT3 Terrain::CalculateNormal(int i, int j) {
+    DirectX::XMFLOAT3 normal = { 0, 1, 0 };
+
+    if (i > 0 && i < verticesPerRow - 1 && j > 0 && j < verticesPerCol - 1) {
+        float hL = heightMap[i - 1][j];
+        float hR = heightMap[i + 1][j];
+        float hD = heightMap[i][j - 1];
+        float hU = heightMap[i][j + 1];
+
+        normal.x = hL - hR;
+        normal.z = hD - hU;
+        normal.y = 2.0f * (width / verticesPerRow);
+
+        DirectX::XMVECTOR n = DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&normal));
+        DirectX::XMStoreFloat3(&normal, n);
+    }
+
+    return normal;
+}
+
 
 void Application::BuildLightCircle()
 {
@@ -28,16 +131,14 @@ void Application::BuildLightCircle()
     const float radius = 2.0f;
     std::vector<SimpleVertex> vertices;
 
-    // Centro do círculo
-    vertices.push_back({ {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f} }); // Amarelo
+    vertices.push_back({ {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f} });
 
-    // Vértices do perímetro
     for (int i = 0; i <= segments; ++i)
     {
         float angle = (float)i / segments * 2.0f * DirectX::XM_PI;
         float x = radius * cosf(angle);
         float z = radius * sinf(angle);
-        vertices.push_back({ {x, 0.0f, z}, {1.0f, 1.0f, 0.0f} }); // Amarelo
+        vertices.push_back({ {x, 0.0f, z}, {1.0f, 1.0f, 0.0f} });
     }
 
     m_lightCircleVertexCount = (UINT)vertices.size();
@@ -50,6 +151,7 @@ void Application::BuildLightCircle()
     m_lightCircleVbv.StrideInBytes = sizeof(SimpleVertex);
     m_lightCircleVbv.SizeInBytes = vbByteSize;
 }
+
 void Application::BuildShadersAndPso()
 {
     Microsoft::WRL::ComPtr<ID3DBlob> vsByteCode = nullptr;
@@ -58,7 +160,6 @@ void Application::BuildShadersAndPso()
 
     UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 
-    // COMPILAR SHADERS PRINCIPAIS (modelo PBR)
     HRESULT hr = D3DCompileFromFile(L"pbr_shaders.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "VS", "vs_5_1", compileFlags, 0, &vsByteCode, &errorBlob);
     if (FAILED(hr))
     {
@@ -79,7 +180,6 @@ void Application::BuildShadersAndPso()
         ThrowIfFailed(hr);
     }
 
-    // Input Layout principal (modelo PBR)
     m_inputLayout =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -90,7 +190,6 @@ void Application::BuildShadersAndPso()
         { "AO", 0, DXGI_FORMAT_R32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
-    // PSO principal (modelo PBR)
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.InputLayout = { m_inputLayout.data(), (UINT)m_inputLayout.size() };
     psoDesc.pRootSignature = m_rootSignature.Get();
@@ -116,7 +215,7 @@ void Application::BuildShadersAndPso()
         ThrowIfFailed(hr);
     }
 }
-// Função para carregar um modelo .obj
+
 Model load_model_from_obj(const std::string& path)
 {
     std::ifstream file(path);
@@ -139,14 +238,12 @@ Model load_model_from_obj(const std::string& path)
 
         if (prefix == "v") {
             DirectX::XMFLOAT3 position;
-            // CORREÇÃO: Troca Y/Z e inverte Z para casar com o sistema de coordenadas do DirectX
             ss >> position.x >> position.z >> position.y;
             position.z = -position.z;
             temp_positions.push_back(position);
         }
         else if (prefix == "vn") {
             DirectX::XMFLOAT3 normal;
-            // CORREÇÃO: Aplica a MESMA transformação para as normais
             ss >> normal.x >> normal.z >> normal.y;
             normal.z = -normal.z;
             temp_normals.push_back(normal);
@@ -225,6 +322,9 @@ Application::Application(HINSTANCE hInstance) : m_hAppInst(hInstance)
 {
     DirectX::XMStoreFloat4x4(&m_world, DirectX::XMMatrixIdentity());
     m_lightPosition = { 2000.0f, 3000.0f, 1500.0f };
+
+    m_terrain = std::make_unique<Terrain>();
+    m_physics = std::make_unique<Physics>();
 }
 
 Application::~Application()
@@ -242,7 +342,7 @@ bool Application::Initialize()
 
     ThrowIfFailed(m_commandList->Reset(m_directCmdListAlloc.Get(), nullptr));
     BuildGeometry();
-    //BuildLightCircle();
+    BuildTerrainGeometry();
     BuildRootSignature();
     BuildShadersAndPso();
     ThrowIfFailed(m_commandList->Close());
@@ -273,6 +373,105 @@ int Application::Run()
     return (int)msg.wParam;
 }
 
+void Application::UpdatePhysics(float dt)
+{
+    // Carregar vetores para cálculo (usando tipos XMVECTOR do DirectXMath)
+    DirectX::XMVECTOR pos = DirectX::XMLoadFloat3(&m_physics->position);
+    DirectX::XMVECTOR vel = DirectX::XMLoadFloat3(&m_physics->velocity);
+    DirectX::XMVECTOR acc = DirectX::XMLoadFloat3(&m_physics->acceleration);
+    DirectX::XMVECTOR orientationQuat = DirectX::XMLoadFloat4(&m_physics->orientation);
+    DirectX::XMVECTOR angularVel = DirectX::XMLoadFloat3(&m_physics->angularVelocity);
+
+    // --- FÍSICA LINEAR (MOVIMENTO) ---
+    // Aplicar gravidade
+    vel = DirectX::XMVectorAdd(vel, DirectX::XMVectorScale(acc, dt));
+    // Atualizar posição
+    pos = DirectX::XMVectorAdd(pos, DirectX::XMVectorScale(vel, dt));
+
+    // --- FÍSICA ANGULAR (ROTAÇÃO) ---
+    // 1. Aplicar amortecimento angular (como atrito do ar)
+    angularVel = DirectX::XMVectorScale(angularVel, 1.0f - m_physics->angularDamping * dt);
+
+    // 2. Calcular a rotação delta para este frame
+    float angularSpeed = DirectX::XMVectorGetX(DirectX::XMVector3Length(angularVel));
+    if (angularSpeed > 0.001f) // Evita divisão por zero
+    {
+        DirectX::XMVECTOR rotationAxis = DirectX::XMVector3Normalize(angularVel);
+        float angle = angularSpeed * dt;
+        DirectX::XMVECTOR deltaQuat = DirectX::XMQuaternionRotationAxis(rotationAxis, angle);
+
+        // 3. Atualizar a orientação principal, multiplicando pelo delta
+        orientationQuat = DirectX::XMQuaternionMultiply(orientationQuat, deltaQuat);
+        orientationQuat = DirectX::XMQuaternionNormalize(orientationQuat); // Normalizar para evitar erros
+    }
+
+    // Armazenar os novos valores de volta nas structs
+    DirectX::XMStoreFloat3(&m_physics->position, pos);
+    DirectX::XMStoreFloat3(&m_physics->velocity, vel);
+    DirectX::XMStoreFloat4(&m_physics->orientation, orientationQuat);
+    DirectX::XMStoreFloat3(&m_physics->angularVelocity, angularVel);
+
+    // --- VERIFICAR COLISÃO COM TERRENO ---
+    float terrainHeight = m_terrain->GetHeightAt(m_physics->position.x, m_physics->position.z);
+    float modelBottom = m_physics->position.y - 2.0f; // Ajuste conforme o tamanho do seu modelo
+
+    if (modelBottom <= terrainHeight) {
+        // Corrige a posição para ficar em cima do terreno
+        m_physics->position.y = terrainHeight + 2.0f;
+
+        if (!m_physics->onGround && m_physics->velocity.y < 0) {
+            float impactSpeed = abs(m_physics->velocity.y);
+
+            // Aplicar quique
+            m_physics->velocity.y = -m_physics->velocity.y * m_physics->bounciness;
+
+            // 4. APLICAR TORQUE NA COLISÃO
+            // Gera um torque aleatório para fazer o objeto tombar de forma imprevisível
+            float torqueStrength = impactSpeed * 0.5f;
+            DirectX::XMFLOAT3 randomTorque = {
+                ((rand() % 200) - 100.0f) / 100.0f * torqueStrength,
+                ((rand() % 200) - 100.0f) / 100.0f * torqueStrength,
+                ((rand() % 200) - 100.0f) / 100.0f * torqueStrength
+            };
+            m_physics->angularVelocity.x += randomTorque.x;
+            m_physics->angularVelocity.y += randomTorque.y;
+            m_physics->angularVelocity.z += randomTorque.z;
+
+            // Se a velocidade for muito baixa, parar o quique
+            if (impactSpeed < 1.0f) {
+                m_physics->velocity.y = 0;
+                m_physics->onGround = true;
+            }
+        }
+    }
+    else {
+        m_physics->onGround = false;
+    }
+
+    // Aplicar atrito linear quando no chão
+    if (m_physics->onGround) {
+        m_physics->velocity.x *= (1.0f - m_physics->friction * dt);
+        m_physics->velocity.z *= (1.0f - m_physics->friction * dt);
+        // Também reduz a rotação mais rápido no chão
+        m_physics->angularVelocity.x *= (1.0f - m_physics->friction * 5.0f * dt);
+        m_physics->angularVelocity.y *= (1.0f - m_physics->friction * 5.0f * dt);
+        m_physics->angularVelocity.z *= (1.0f - m_physics->friction * 5.0f * dt);
+    }
+
+    // --- 5. ATUALIZAR MATRIZ WORLD COM ROTAÇÃO E TRANSLAÇÃO ---
+    // Criar matriz de rotação a partir do quaternion
+    DirectX::XMMATRIX rotationMatrix = DirectX::XMMatrixRotationQuaternion(orientationQuat);
+    // Criar matriz de translação a partir da posição
+    DirectX::XMMATRIX translationMatrix = DirectX::XMMatrixTranslation(
+        m_physics->position.x,
+        m_physics->position.y,
+        m_physics->position.z
+    );
+
+    // A matriz final é Rotação * Translação
+    DirectX::XMStoreFloat4x4(&m_world, rotationMatrix * translationMatrix);
+}
+
 void Application::Update(float dt)
 {
     const float camSpeed = 10.0f * dt;
@@ -282,13 +481,26 @@ void Application::Update(float dt)
     if (GetAsyncKeyState('D') & 0x8000) m_Camera.Strafe(camSpeed);
     if (GetAsyncKeyState(VK_SPACE) & 0x8000) m_Camera.Jump(camSpeed);
     if (GetAsyncKeyState(VK_LCONTROL) & 0x8000) m_Camera.Jump(-camSpeed);
+
+    const float forceStrength = 50.0f;
+    if (GetAsyncKeyState('I') & 0x8000) m_physics->velocity.z += forceStrength * dt;
+    if (GetAsyncKeyState('K') & 0x8000) m_physics->velocity.z -= forceStrength * dt;
+    if (GetAsyncKeyState('J') & 0x8000) m_physics->velocity.x -= forceStrength * dt;
+    if (GetAsyncKeyState('L') & 0x8000) m_physics->velocity.x += forceStrength * dt;
+    if (GetAsyncKeyState('U') & 0x8000 && m_physics->onGround) {
+        m_physics->velocity.y = 20.0f;
+        m_physics->onGround = false;
+    }
+
     m_Camera.UpdateViewMatrix();
+
+    UpdatePhysics(dt);
 
     static float lightAngle = 0.0f;
     lightAngle += dt * 0.5f;
-    m_lightPosition.x = 10.0f * cosf(lightAngle);
+    m_lightPosition.x = 50.0f * cosf(lightAngle);
     m_lightPosition.y = 80.0f;
-    m_lightPosition.z = 10.0f * sinf(lightAngle);
+    m_lightPosition.z = 50.0f * sinf(lightAngle);
 }
 
 void Application::Draw()
@@ -307,30 +519,45 @@ void Application::Draw()
     auto rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), currentBackBuffer, m_rtvDescriptorSize);
     auto dsvHandle = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    m_commandList->ClearRenderTargetView(rtvHandle, DirectX::Colors::CornflowerBlue, 0, nullptr);
+    m_commandList->ClearRenderTargetView(rtvHandle, DirectX::Colors::SkyBlue, 0, nullptr);
     m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     m_commandList->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
-
     m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+    DirectX::XMMATRIX view = m_Camera.GetView();
+    DirectX::XMMATRIX proj = m_Camera.GetProjection();
+    DirectX::XMFLOAT3 cameraPos = m_Camera.GetPosition3f();
+    DirectX::XMFLOAT3 lightColor = { 300.0f, 300.0f, 300.0f };
+
+    m_commandList->IASetVertexBuffers(0, 1, &m_terrainVbv);
+    m_commandList->IASetIndexBuffer(&m_terrainIbv);
+    m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    DirectX::XMMATRIX terrainWorld = DirectX::XMMatrixIdentity();
+    DirectX::XMMATRIX terrainWorldViewProj = terrainWorld * view * proj;
+    terrainWorldViewProj = DirectX::XMMatrixTranspose(terrainWorldViewProj);
+
+    m_commandList->SetGraphicsRoot32BitConstants(0, 16, &terrainWorldViewProj, 0);
+    m_commandList->SetGraphicsRoot32BitConstants(1, 4, &cameraPos, 0);
+    m_commandList->SetGraphicsRoot32BitConstants(2, 4, &m_lightPosition, 0);
+    m_commandList->SetGraphicsRoot32BitConstants(3, 4, &lightColor, 0);
+    m_commandList->SetGraphicsRoot32BitConstants(4, 16, &terrainWorld, 0);
+
+    m_commandList->DrawIndexedInstanced(m_terrainIndexCount, 1, 0, 0, 0);
+
     m_commandList->IASetVertexBuffers(0, 1, &m_modelVbv);
     m_commandList->IASetIndexBuffer(&m_modelIbv);
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     DirectX::XMMATRIX world = DirectX::XMLoadFloat4x4(&m_world);
-    DirectX::XMMATRIX view = m_Camera.GetView();
-    DirectX::XMMATRIX proj = m_Camera.GetProjection();
     DirectX::XMMATRIX worldViewProj = world * view * proj;
     worldViewProj = DirectX::XMMatrixTranspose(worldViewProj);
-
-    DirectX::XMFLOAT3 cameraPos = m_Camera.GetPosition3f();
-    DirectX::XMFLOAT3 lightColor = { 300.0f, 300.0f, 300.0f };
 
     m_commandList->SetGraphicsRoot32BitConstants(0, 16, &worldViewProj, 0);
     m_commandList->SetGraphicsRoot32BitConstants(1, 4, &cameraPos, 0);
     m_commandList->SetGraphicsRoot32BitConstants(2, 4, &m_lightPosition, 0);
     m_commandList->SetGraphicsRoot32BitConstants(3, 4, &lightColor, 0);
-
     m_commandList->SetGraphicsRoot32BitConstants(4, 16, &world, 0);
 
     m_commandList->DrawIndexedInstanced(m_modelIndexCount, 1, 0, 0, 0);
@@ -345,6 +572,32 @@ void Application::Draw()
 
     ThrowIfFailed(m_swapChain->Present(1, 0));
     FlushCommandQueue();
+}
+
+void Application::BuildTerrainGeometry()
+{
+    Model terrainModel = m_terrain->GenerateTerrainMesh();
+
+    if (terrainModel.vertices.empty() || terrainModel.indices.empty())
+    {
+        throw std::runtime_error("O terreno gerado está vazio.");
+    }
+
+    const UINT vbByteSize = (UINT)terrainModel.vertices.size() * sizeof(Vertex);
+    const UINT ibByteSize = (UINT)terrainModel.indices.size() * sizeof(unsigned int);
+
+    m_terrainVertexBufferGPU = CreateDefaultBuffer(terrainModel.vertices.data(), vbByteSize, m_terrainVertexBufferUploader);
+    m_terrainIndexBufferGPU = CreateDefaultBuffer(terrainModel.indices.data(), ibByteSize, m_terrainIndexBufferUploader);
+
+    m_terrainVbv.BufferLocation = m_terrainVertexBufferGPU->GetGPUVirtualAddress();
+    m_terrainVbv.StrideInBytes = sizeof(Vertex);
+    m_terrainVbv.SizeInBytes = vbByteSize;
+
+    m_terrainIbv.BufferLocation = m_terrainIndexBufferGPU->GetGPUVirtualAddress();
+    m_terrainIbv.Format = DXGI_FORMAT_R32_UINT;
+    m_terrainIbv.SizeInBytes = ibByteSize;
+
+    m_terrainIndexCount = (UINT)terrainModel.indices.size();
 }
 
 LRESULT Application::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -373,6 +626,14 @@ LRESULT Application::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         m_LastMousePos.x = LOWORD(lParam);
         m_LastMousePos.y = HIWORD(lParam);
+        return 0;
+    case WM_KEYDOWN:
+
+        if (wParam == 'R') {
+            m_physics->position = { 0, 50, 0 };
+            m_physics->velocity = { 0, 0, 0 };
+            m_physics->onGround = false;
+        }
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -480,7 +741,7 @@ bool Application::InitWindow()
     wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
     wc.lpszClassName = L"MainWnd";
     if (!RegisterClass(&wc)) return false;
-    m_hMainWnd = CreateWindow(L"MainWnd", L"Modelo OBJ DirectX 12", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, m_ClientWidth, m_ClientHeight, 0, 0, m_hAppInst, this);
+    m_hMainWnd = CreateWindow(L"MainWnd", L"Modelo OBJ com Terreno e Física - DirectX 12", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, m_ClientWidth, m_ClientHeight, 0, 0, m_hAppInst, this);
     if (!m_hMainWnd) return false;
     ShowWindow(m_hMainWnd, SW_SHOW);
     UpdateWindow(m_hMainWnd);
@@ -557,6 +818,7 @@ void Application::CreateRtvDescriptorHeap()
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     ThrowIfFailed(m_d3dDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(m_rtvHeap.GetAddressOf())));
 }
+
 void Application::CreateDsvDescriptorHeap()
 {
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
